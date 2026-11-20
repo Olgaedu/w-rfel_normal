@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Spielwürfel</title>
+    <!-- Tailwind CSS für modernes Styling und Responsivität -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js für die 3D-Darstellung -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Tone.js für realistische, prozedurale Soundeffekte beim Würfeln -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Google Font: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Verhindert Scrollbalken */
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            cursor: grab;
+        }
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+        .ui-overlay {
+            position: relative;
+            z-index: 10;
+            pointer-events: none; /* Lässt Maus-Interaktionen für den 3D-Canvas durch */
+        }
+        .interactive {
+            pointer-events: auto; /* Aktiviert Klicks auf Buttons und Panels */
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.7; }
+            50% { transform: scale(1.05); opacity: 0.3; }
+            100% { transform: scale(0.95); opacity: 0.7; }
+        }
+        .result-badge {
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Benutzeroberfläche (Overlay) -->
+    <div class="ui-overlay flex flex-col justify-between min-h-screen p-4 sm:p-8">
+        
+        <!-- Header & Statistik -->
+        <header class="flex flex-wrap items-center justify-between gap-4">
+            <div class="interactive bg-slate-800/80 backdrop-blur-md border border-slate-700/50 px-5 py-3 rounded-2xl shadow-xl">
+                <h1 class="text-xl sm:text-2xl font-extrabold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                    3D Spielwürfel
+                </h1>
+                <p class="text-xs text-slate-400 hidden sm:block">Ziehen zum Drehen • Leertaste oder Button zum Würfeln</p>
+            </div>
+
+            <!-- Kontroll-Leiste (Sound & Verlauf) -->
+            <div class="interactive flex items-center gap-3">
+                <!-- Würfel-Historie -->
+                <div class="bg-slate-800/80 backdrop-blur-md border border-slate-700/50 px-4 py-2 rounded-2xl shadow-xl flex items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Verlauf:</span>
+                    <div id="history-list" class="flex items-center gap-1.5 min-w-[80px] justify-end">
+                        <span class="text-xs text-slate-500 italic">Noch kein Wurf</span>
+                    </div>
+                </div>
+
+                <!-- Ton An/Aus Button -->
+                <button id="sound-toggle" title="Ton umschalten" class="bg-slate-800/80 hover:bg-slate-700/80 backdrop-blur-md border border-slate-700/50 p-3 rounded-2xl shadow-xl transition-all active:scale-95">
+                    <svg id="sound-on-icon" class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                    </svg>
+                    <svg id="sound-off-icon" class="w-6 h-6 text-slate-500 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Ergebnisanzeige in der Mitte oben -->
+        <div class="flex flex-col items-center justify-center my-auto pointer-events-none">
+            <div id="result-container" class="result-badge opacity-0 scale-75 bg-slate-900/70 backdrop-blur-md border border-amber-500/30 px-8 py-4 rounded-3xl shadow-2xl text-center">
+                <span class="block text-xs font-bold uppercase tracking-widest text-amber-400 mb-1">Ergebnis</span>
+                <span id="result-number" class="text-5xl sm:text-6xl font-black text-white drop-shadow-md">-</span>
+            </div>
+        </div>
+
+        <!-- Footer & Haupt-Aktionsbutton -->
+        <footer class="flex flex-col items-center gap-4 pb-2">
+            <!-- Farb-Auswahl für den Würfel -->
+            <div class="interactive flex items-center gap-2 bg-slate-800/80 backdrop-blur-md border border-slate-700/50 p-2 rounded-2xl shadow-lg">
+                <button onclick="changeDiceTheme('ivory')" class="w-7 h-7 rounded-xl bg-[#f8f5f0] border-2 border-slate-400 hover:scale-110 transition-transform" title="Klassisch Elfenbein"></button>
+                <button onclick="changeDiceTheme('ruby')" class="w-7 h-7 rounded-xl bg-red-600 border-2 border-red-400 hover:scale-110 transition-transform" title="Rubinrot"></button>
+                <button onclick="changeDiceTheme('emerald')" class="w-7 h-7 rounded-xl bg-emerald-600 border-2 border-emerald-400 hover:scale-110 transition-transform" title="Smaragdgrün"></button>
+                <button onclick="changeDiceTheme('obsidian')" class="w-7 h-7 rounded-xl bg-slate-900 border-2 border-amber-400 hover:scale-110 transition-transform" title="Obsidian Gold"></button>
+            </div>
+
+            <!-- Würfel-Button -->
+            <button id="roll-button" class="interactive group relative inline-flex items-center justify-center px-10 py-4 text-lg font-extrabold text-slate-950 transition-all duration-200 bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 rounded-2xl shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:shadow-[0_0_45px_rgba(251,191,36,0.65)] hover:-translate-y-0.5 active:translate-y-0.5 active:scale-95 focus:outline-none">
+                <svg class="w-6 h-6 mr-3 transition-transform duration-500 group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+                </svg>
+                <span>WÜRFELN</span>
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        // --- GLOBALE VARIABLEN & KONFIGURATION ---
+        let scene, camera, renderer, diceMesh, shadowPlane;
+        let isRolling = false;
+        let soundEnabled = true;
+        let rollHistory = [];
+        
+        // Kamera-Steuerung (Orbit-Logik)
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        let cameraAngle = { theta: 0.4, phi: 0.95 }; // Kugelkoordinaten für Kamera
+        let cameraRadius = 7.5;
+
+        // Animations-Variablen für den Wurf
+        let rollStartTime = 0;
+        const rollDuration = 1100; // Dauer in Millisekunden
+        let startRotation = new THREE.Euler();
+        let targetRotation = new THREE.Euler();
+        let startPosition = new THREE.Vector3(0, 0, 0);
+        let currentResult = 6;
+
+        // Farb-Themes für den Würfel
+        const themes = {
+            ivory: { bg: '#f8f5f0', pip: '#1e293b', border: '#e2dcd0' },
+            ruby: { bg: '#dc2626', pip: '#ffffff', border: '#991b1b' },
+            emerald: { bg: '#059669', pip: '#ffffff', border: '#065f46' },
+            obsidian: { bg: '#0f172a', pip: '#fbbf24', border: '#334155' }
+        };
+        let currentTheme = themes.ivory;
+
+        // --- SOUND-SYSTEM (TONE.JS) ---
+        let rollSynth;
+        function initAudio() {
+            if (!rollSynth) {
+                rollSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.02,
+                    octaves: 2,
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+                }).toDestination();
+                rollSynth.volume.value = -8;
+            }
+        }
+
+        function playBounceSound(intensity = 1) {
+            if (!soundEnabled) return;
+            try {
+                if (Tone.context.state !== 'running') {
+                    Tone.start();
+                }
+                initAudio();
+                // Zufällige leichte Tonhöhenvariation für realistisches Klappern
+                const note = intensity > 0.6 ? "C3" : (intensity > 0.3 ? "E3" : "G3");
+                rollSynth.triggerAttackRelease(note, "32n", undefined, Math.min(1, intensity));
+            } catch (e) {
+                console.warn("Audio konnte nicht abgespielt werden:", e);
+            }
+        }
+
+        // --- TEXTUR-GENERATOR FÜR WÜRFELSEITEN ---
+        /**
+         * Erzeugt eine hochauflösende Canvas-Textur für eine Würfelseite (1 bis 6)
+         */
+        function createDiceFaceTexture(number, theme) {
+            const size = 512;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            // Hintergrund
+            ctx.fillStyle = theme.bg;
+            ctx.fillRect(0, 0, size, size);
+
+            // Dezenter Rahmen für 3D-Kanten-Tiefe
+            ctx.strokeStyle = theme.border;
+            ctx.lineWidth = 24;
+            ctx.strokeRect(12, 12, size - 24, size - 24);
+
+            // Augen (Pips) zeichnen
+            ctx.fillStyle = theme.pip;
+            const radius = 44;
+            const offset = 135;
+            const center = size / 2;
+
+            // Positionen der Augen relativ zur Mitte
+            const positions = {
+                1: [[0, 0]],
+                2: [[-offset, -offset], [offset, offset]],
+                3: [[-offset, -offset], [0, 0], [offset, offset]],
+                4: [[-offset, -offset], [offset, -offset], [-offset, offset], [offset, offset]],
+                5: [[-offset, -offset], [offset, -offset], [0, 0], [-offset, offset], [offset, offset]],
+                6: [[-offset, -offset], [offset, -offset], [-offset, 0], [offset, 0], [-offset, offset], [offset, offset]]
+            };
+
+            const pips = positions[number];
+            pips.forEach(([dx, dy]) => {
+                ctx.beginPath();
+                ctx.arc(center + dx, center + dy, radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Kleiner Glanzpunkt auf jedem Auge für Plastizität
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.beginPath();
+                ctx.arc(center + dx - 10, center + dy - 10, radius * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = theme.pip;
+            });
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.anisotropy = 4;
+            return texture;
+        }
+
+        /**
+         * Erstellt das Material-Array in der korrekten Three.js BoxGeometry-Reihenfolge:
+         * +X (Rechts): 3, -X (Links): 4, +Y (Oben): 1, -Y (Unten): 6, +Z (Vorne): 2, -Z (Hinten): 5
+         * Gegenüberliegende Seiten ergeben immer 7!
+         */
+        function getDiceMaterials(theme) {
+            const faceOrder = [3, 4, 1, 6, 2, 5];
+            return faceOrder.map(num => new THREE.MeshStandardMaterial({
+                map: createDiceFaceTexture(num, theme),
+                roughness: 0.25,
+                metalness: 0.05
+            }));
+        }
+
+        // --- 3D SZENE INITIALISIERUNG ---
+        function initThreeJS() {
+            const container = document.getElementById('canvas-container');
+
+            // Szene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a); // Tailwind slate-900
+            scene.fog = new THREE.FogExp2(0x0f172a, 0.035);
+
+            // Kamera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            updateCameraPosition();
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Beleuchtung
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight.position.set(5, 12, 7);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.near = 2;
+            dirLight.shadow.camera.far = 25;
+            dirLight.shadow.bias = -0.001;
+            scene.add(dirLight);
+
+            // Warmes Akzentlicht von der Seite
+            const rimLight = new THREE.PointLight(0xfbbf24, 0.5, 20);
+            rimLight.position.set(-6, 4, -5);
+            scene.add(rimLight);
+
+            // Boden (Spielfläche)
+            const floorGeometry = new THREE.PlaneGeometry(50, 50);
+            const floorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                roughness: 0.8,
+                metalness: 0.1
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = -1.01;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Dezentes Raster auf dem Tisch für bessere Raumwahrnehmung
+            const gridHelper = new THREE.GridHelper(30, 30, 0x334155, 0x1e293b);
+            gridHelper.position.y = -1.0;
+            scene.add(gridHelper);
+
+            // Würfel erstellen (Größe 2x2x2, Mittelpunkt bei y=0 liegt exakt auf dem Boden bei y=-1)
+            const geometry = new THREE.BoxGeometry(2, 2, 2);
+            const materials = getDiceMaterials(currentTheme);
+            diceMesh = new THREE.Mesh(geometry, materials);
+            diceMesh.castShadow = true;
+            diceMesh.receiveShadow = true;
+            scene.add(diceMesh);
+
+            // Event-Listener einrichten
+            setupEvents();
+        }
+
+        // --- WÜRFEL-LOGIK & ROTATIONS-MATHEMATIK ---
+        /**
+         * Berechnet die exakte Ziel-Rotation (Euler-Winkel), damit die gewürfelte Augenzahl
+         * nach dem Wurf exakt nach oben (+Y) zeigt.
+         */
+        function getTargetRotationForNumber(num) {
+            // Basis-Rotationen für unsere Seitenbelegung:
+            // +Y = 1, -Y = 6, +X = 3, -X = 4, +Z = 2, -Z = 5
+            const baseRotations = {
+                1: { x: 0, y: 0, z: 0 },
+                6: { x: Math.PI, y: 0, z: 0 },
+                2: { x: -Math.PI / 2, y: 0, z: 0 },
+                5: { x: Math.PI / 2, y: 0, z: 0 },
+                3: { x: 0, y: 0, z: Math.PI / 2 },
+                4: { x: 0, y: 0, z: -Math.PI / 2 }
+            };
+
+            const base = baseRotations[num];
+            // Zufällige Y-Drehung (0°, 90°, 180°, 270°) für natürliche Ausrichtung auf dem Tisch
+            const randomY = (Math.floor(Math.random() * 4)) * (Math.PI / 2);
+            
+            // Mehrfache volle Umdrehungen (2 bis 3 Spins) für spektakuläre Wurf-Animation
+            const extraSpinsX = (Math.floor(Math.random() * 2) + 2) * Math.PI * 2 * (Math.random() > 0.5 ? 1 : -1);
+            const extraSpinsZ = (Math.floor(Math.random() * 2) + 2) * Math.PI * 2 * (Math.random() > 0.5 ? 1 : -1);
+
+            return new THREE.Euler(
+                base.x + extraSpinsX,
+                randomY,
+                base.z + extraSpinsZ,
+                'XYZ'
+            );
+        }
+
+        let bounceTriggered1 = false;
+        let bounceTriggered2 = false;
+
+        /**
+         * Startet einen neuen Wurf
+         */
+        function rollDice() {
+            if (isRolling) return;
+            
+            isRolling = true;
+            bounceTriggered1 = false;
+            bounceTriggered2 = false;
+
+            // UI während des Wurfs aktualisieren
+            const resultContainer = document.getElementById('result-container');
+            resultContainer.classList.remove('opacity-100', 'scale-100');
+            resultContainer.classList.add('opacity-0', 'scale-75');
+
+            // Zufallszahl 1-6 bestimmen
+            currentResult = Math.floor(Math.random() * 6) + 1;
+
+            // Start- und Zielwerte speichern
+            startRotation.copy(diceMesh.rotation);
+            targetRotation = getTargetRotationForNumber(currentResult);
+            rollStartTime = performance.now();
+
+            // Erster Absprung-Sound
+            playBounceSound(0.9);
+        }
+
+        /**
+         * Aktualisiert den Verlauf und zeigt das Ergebnis an
+         */
+        function finishRoll() {
+            isRolling = false;
+            
+            // Exakte Endposition & Rotation garantieren
+            diceMesh.position.set(0, 0, 0);
+            diceMesh.rotation.copy(targetRotation);
+
+            // Ergebnisanzeige einblenden
+            const resultContainer = document.getElementById('result-container');
+            const resultNumber = document.getElementById('result-number');
+            resultNumber.textContent = currentResult;
+            resultContainer.classList.remove('opacity-0', 'scale-75');
+            resultContainer.classList.add('opacity-100', 'scale-100');
+
+            // Verlauf aktualisieren (maximal die letzten 5 Würfe)
+            rollHistory.unshift(currentResult);
+            if (rollHistory.length > 5) rollHistory.pop();
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const historyList = document.getElementById('history-list');
+            historyList.innerHTML = rollHistory.map((num, idx) => `
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-lg text-xs font-bold ${
+                    idx === 0 
+                    ? 'bg-amber-400 text-slate-950 shadow-sm scale-110' 
+                    : 'bg-slate-700 text-slate-300'
+                }">
+                    ${num}
+                </span>
+            `).join('');
+        }
+
+        // --- FARB-THEME WECHSELN ---
+        window.changeDiceTheme = function(themeKey) {
+            if (!themes[themeKey]) return;
+            currentTheme = themes[themeKey];
+            diceMesh.material = getDiceMaterials(currentTheme);
+        };
+
+        // --- KAMERA & INTERAKTION ---
+        function updateCameraPosition() {
+            camera.position.x = cameraRadius * Math.sin(cameraAngle.phi) * Math.sin(cameraAngle.theta);
+            camera.position.y = cameraRadius * Math.cos(cameraAngle.phi);
+            camera.position.z = cameraRadius * Math.sin(cameraAngle.phi) * Math.cos(cameraAngle.theta);
+            camera.lookAt(0, 0, 0);
+        }
+
+        function setupEvents() {
+            const container = document.getElementById('canvas-container');
+            const rollBtn = document.getElementById('roll-button');
+            const soundBtn = document.getElementById('sound-toggle');
+
+            // Würfel-Button
+            rollBtn.addEventListener('click', rollDice);
+
+            // Leertaste zum Würfeln
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    rollDice();
+                }
+            });
+
+            // Ton umschalten
+            soundBtn.addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                document.getElementById('sound-on-icon').classList.toggle('hidden', !soundEnabled);
+                document.getElementById('sound-off-icon').classList.toggle('hidden', soundEnabled);
+            });
+
+            // Maus-Steuerung für Kamera-Drehung
+            container.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+
+                cameraAngle.theta -= deltaX * 0.008;
+                cameraAngle.phi = Math.max(0.25, Math.min(Math.PI / 2 - 0.05, cameraAngle.phi - deltaY * 0.008));
+
+                updateCameraPosition();
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            // Touch-Steuerung für Mobilgeräte
+            let touchStartTime = 0;
+            let touchMoved = false;
+
+            container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    isDragging = true;
+                    touchMoved = false;
+                    touchStartTime = performance.now();
+                    previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                }
+            }, { passive: true });
+
+            container.addEventListener('touchmove', (e) => {
+                if (!isDragging || e.touches.length !== 1) return;
+                touchMoved = true;
+                const deltaX = e.touches[0].clientX - previousMousePosition.x;
+                const deltaY = e.touches[0].clientY - previousMousePosition.y;
+
+                cameraAngle.theta -= deltaX * 0.01;
+                cameraAngle.phi = Math.max(0.25, Math.min(Math.PI / 2 - 0.05, cameraAngle.phi - deltaY * 0.01));
+
+                updateCameraPosition();
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }, { passive: true });
+
+            container.addEventListener('touchend', () => {
+                isDragging = false;
+                // Kurzes Tippen auf den Würfel/Hintergrund löst ebenfalls einen Wurf aus
+                if (!touchMoved && (performance.now() - touchStartTime < 250)) {
+                    rollDice();
+                }
+            });
+
+            // Fenstergröße anpassen
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        // --- ANIMATIONS-SCHLEIFE ---
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+
+            if (isRolling) {
+                const elapsed = currentTime - rollStartTime;
+                const progress = Math.min(elapsed / rollDuration, 1);
+
+                // Kubisches Ease-Out für sanftes Ausrollen
+                const easeOut = 1 - Math.pow(1 - progress, 3);
+
+                // Rotation interpolieren
+                diceMesh.rotation.x = startRotation.x + (targetRotation.x - startRotation.x) * easeOut;
+                diceMesh.rotation.y = startRotation.y + (targetRotation.y - startRotation.y) * easeOut;
+                diceMesh.rotation.z = startRotation.z + (targetRotation.z - startRotation.z) * easeOut;
+
+                // Realistische Sprung-Kurve (Parabel mit zwei Aufprallern)
+                let heightY = 0;
+                if (progress < 0.55) {
+                    // Erster großer Sprung
+                    const p1 = progress / 0.55;
+                    heightY = Math.sin(p1 * Math.PI) * 3.2;
+                } else if (progress < 0.85) {
+                    // Zweiter kleinerer Sprung
+                    if (!bounceTriggered1) {
+                        bounceTriggered1 = true;
+                        playBounceSound(0.6);
+                    }
+                    const p2 = (progress - 0.55) / 0.30;
+                    heightY = Math.sin(p2 * Math.PI) * 1.1;
+                } else {
+                    // Drittes leichtes Nachfedern
+                    if (!bounceTriggered2) {
+                        bounceTriggered2 = true;
+                        playBounceSound(0.3);
+                    }
+                    const p3 = (progress - 0.85) / 0.15;
+                    heightY = Math.sin(p3 * Math.PI) * 0.25;
+                }
+
+                diceMesh.position.y = heightY;
+
+                if (progress >= 1) {
+                    finishRoll();
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Start nach vollständigem Laden der Seite
+        window.onload = function() {
+            initThreeJS();
+            requestAnimationFrame(animate);
+            // Automatischer erster Wurf nach kurzem Moment zur Begrüßung
+            setTimeout(rollDice, 400);
+        };
+    </script>
+</body>
+</html>
